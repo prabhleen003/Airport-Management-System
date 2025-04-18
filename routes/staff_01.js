@@ -5,32 +5,36 @@ const db = require('../db/connection');
 // Staff dashboard
 router.get('/dashboard', async (req, res) => {
     try {
+        // Get upcoming flights (next 30 minutes)
         const [upcomingFlights] = await db.query(`
             SELECT * FROM flights 
             WHERE departure_time BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 30 MINUTE)
         `);
-
+        
+        // Get assigned duties
         const [duties] = await db.query(`
-            SELECT d.*, a.name AS port_name 
+            SELECT d.*, p.name as port_name 
             FROM duties d
-            JOIN airports a ON d.airport_id = a.airport_id
-            WHERE d.emp_id = ? AND d.end_time > NOW()
+            JOIN ports p ON d.port_id = p.id
+            WHERE d.staff_id = ? AND d.end_time > NOW()
             ORDER BY d.start_time
         `, [req.session.user.id]);
-
+        
+        // Get all upcoming flights
         const [flights] = await db.query(`
             SELECT * FROM flights 
             WHERE departure_time > NOW()
             ORDER BY departure_time
             LIMIT 10
         `);
-
+        
+        // Get staff leave requests
         const [leaveRequests] = await db.query(`
             SELECT * FROM leave_requests
-            WHERE emp_id = ?
+            WHERE user_id = ?
             ORDER BY start_date
         `, [req.session.user.id]);
-
+        
         res.render('staff/dashboard', {
             user: req.session.user,
             upcomingFlights,
@@ -53,14 +57,14 @@ router.get('/leave-request', (req, res) => {
 
 router.post('/leave-request', async (req, res) => {
     const { start_date, end_date, reason } = req.body;
-    const emp_id = req.session.user.id;
-
+    const user_id = req.session.user.id;
+    
     try {
         await db.query(`
-            INSERT INTO leave_requests (emp_id, start_date, end_date, reason, status)
+            INSERT INTO leave_requests (user_id, start_date, end_date, reason, status)
             VALUES (?, ?, ?, ?, 'pending')
-        `, [emp_id, start_date, end_date, reason]);
-
+        `, [user_id, start_date, end_date, reason]);
+        
         res.redirect('/staff/dashboard');
     } catch (error) {
         console.error('Leave Request Error:', error);
@@ -72,13 +76,13 @@ router.post('/leave-request', async (req, res) => {
 router.get('/duties', async (req, res) => {
     try {
         const [duties] = await db.query(`
-            SELECT d.*, a.name AS port_name 
+            SELECT d.*, p.name as port_name 
             FROM duties d
-            JOIN airports a ON d.airport_id = a.airport_id
-            WHERE d.emp_id = ?
+            JOIN ports p ON d.port_id = p.id
+            WHERE d.staff_id = ?
             ORDER BY d.start_time
         `, [req.session.user.id]);
-
+        
         res.render('staff/duties', {
             user: req.session.user,
             duties

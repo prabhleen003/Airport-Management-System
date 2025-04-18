@@ -4,12 +4,12 @@ const db = require('../db/connection');
 
 // Admin Dashboard
 router.get('/dashboard', (req, res) => {
-    console.log('Admin dashboard access attempt:', req.session.user);
+    console.log('Admin dashboard access attempt:', req.session.user); // Debug log
     if (!req.session.user || req.session.user.role !== 'admin') {
-        console.log('Unauthorized access to admin dashboard');
+        console.log('Unauthorized access to admin dashboard'); // Debug log
         return res.redirect('/');
     }
-    console.log('Rendering admin dashboard');
+    console.log('Rendering admin dashboard'); // Debug log
     res.render('admin/dashboard', { user: req.session.user });
 });
 
@@ -63,14 +63,14 @@ router.get('/reports', (req, res) => {
 router.post('/staff/approve/:id', async (req, res) => {
     const { id } = req.params;
     const { action } = req.body;
-
+    
     try {
         if (action === 'approve') {
-            await db.query('UPDATE employees SET approved = 1 WHERE emp_id = ?', [id]);
+            await db.query('UPDATE users SET approved = 1 WHERE id = ?', [id]);
         } else if (action === 'reject') {
-            await db.query('DELETE FROM employees WHERE emp_id = ?', [id]);
+            await db.query('DELETE FROM users WHERE id = ?', [id]);
         }
-
+        
         res.redirect('/admin/dashboard');
     } catch (error) {
         console.error('Staff Approval Error:', error);
@@ -81,13 +81,15 @@ router.post('/staff/approve/:id', async (req, res) => {
 // Assign duties to staff
 router.get('/assign-duties', async (req, res) => {
     try {
+        // Get all approved staff
         const [staff] = await db.query(`
-            SELECT * FROM employees 
+            SELECT * FROM users 
             WHERE role = 'staff' AND approved = 1
         `);
-
-        const [ports] = await db.query('SELECT * FROM airport_services');
-
+        
+        // Get all ports/locations
+        const [ports] = await db.query('SELECT * FROM ports');
+        
         res.render('admin/assign-duties', {
             user: req.session.user,
             staff,
@@ -101,13 +103,13 @@ router.get('/assign-duties', async (req, res) => {
 
 router.post('/assign-duties', async (req, res) => {
     const { staff_id, port_id, duty, start_time, end_time } = req.body;
-
+    
     try {
         await db.query(`
-            INSERT INTO duties (emp_id, airport_id, service_desc, start_time, end_time)
+            INSERT INTO duties (staff_id, port_id, duty_description, start_time, end_time)
             VALUES (?, ?, ?, ?, ?)
         `, [staff_id, port_id, duty, start_time, end_time]);
-
+        
         res.redirect('/admin/dashboard');
     } catch (error) {
         console.error('Assign Duties Post Error:', error);
@@ -119,24 +121,27 @@ router.post('/assign-duties', async (req, res) => {
 router.post('/leave-request/:id', async (req, res) => {
     const { id } = req.params;
     const { action, reassign_to } = req.body;
-
+    
     try {
         if (action === 'approve') {
-            await db.query('UPDATE leave_requests SET status = "approved" WHERE leave_id = ?', [id]);
-
+            await db.query('UPDATE leave_requests SET status = "approved" WHERE id = ?', [id]);
+            
+            // If reassigned, update duties
             if (reassign_to) {
-                const [leaveRequests] = await db.query('SELECT * FROM leave_requests WHERE leave_id = ?', [id]);
+                // Get the leave request to find staff_id
+                const [leaveRequests] = await db.query('SELECT * FROM leave_requests WHERE id = ?', [id]);
                 const leaveRequest = leaveRequests[0];
-
+                
+                // Update all duties during leave period
                 await db.query(`
                     UPDATE duties 
-                    SET emp_id = ? 
-                    WHERE emp_id = ? AND 
+                    SET staff_id = ? 
+                    WHERE staff_id = ? AND 
                     ((start_time BETWEEN ? AND ?) OR 
                     (end_time BETWEEN ? AND ?))
                 `, [
-                    reassign_to,
-                    leaveRequest.emp_id,
+                    reassign_to, 
+                    leaveRequest.user_id,
                     leaveRequest.start_date,
                     leaveRequest.end_date,
                     leaveRequest.start_date,
@@ -144,9 +149,9 @@ router.post('/leave-request/:id', async (req, res) => {
                 ]);
             }
         } else if (action === 'reject') {
-            await db.query('UPDATE leave_requests SET status = "rejected" WHERE leave_id = ?', [id]);
+            await db.query('UPDATE leave_requests SET status = "rejected" WHERE id = ?', [id]);
         }
-
+        
         res.redirect('/admin/dashboard');
     } catch (error) {
         console.error('Leave Request Error:', error);

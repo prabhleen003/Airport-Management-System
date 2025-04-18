@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const db = require('../db/connection');
 
 // Predefined admin credentials
 const ADMIN_CREDENTIALS = {
@@ -18,15 +19,12 @@ router.get('/login/:role', (req, res) => {
     res.render('auth/login', { role });
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
     const { email, password, role } = req.body;
-    console.log('Login attempt:', { email, role }); // Debug log
-    
-    // Special handling for admin login
+    console.log('Login attempt:', { email, role });
+
     if (role === 'admin') {
         if (email === ADMIN_CREDENTIALS.email && password === ADMIN_CREDENTIALS.password) {
-            console.log('Admin login successful'); // Debug log
-            // Set admin session
             req.session.user = {
                 id: 'admin',
                 name: ADMIN_CREDENTIALS.name,
@@ -35,23 +33,67 @@ router.post('/login', (req, res) => {
             };
             return res.redirect('/admin/dashboard');
         } else {
-            console.log('Invalid admin credentials'); // Debug log
-            return res.render('auth/login', { 
-                role, 
-                error: 'Invalid admin credentials' 
+            return res.render('auth/login', {
+                role,
+                error: 'Invalid admin credentials'
             });
         }
     }
 
-    // For other roles (staff and passenger), show database not available message
-    if (role === 'staff' || role === 'passenger') {
-        return res.render('auth/login', { 
-            role, 
-            error: 'Database connection is not available. Please try again later.' 
+    try {
+        if (role === 'staff') {
+            const [results] = await db.query(
+                'SELECT * FROM employees WHERE email = ? AND password = ? AND approved = 1',
+                [email, password]
+            );
+
+            if (results.length > 0) {
+                const staff = results[0];
+                req.session.user = {
+                    id: staff.emp_id,
+                    name: staff.name,
+                    email: staff.email,
+                    role: 'staff'
+                };
+                return res.redirect('/staff/dashboard');
+            } else {
+                return res.render('auth/login', {
+                    role,
+                    error: 'Invalid credentials or not approved yet.'
+                });
+            }
+        }
+
+        if (role === 'passenger') {
+            const [results] = await db.query(
+                'SELECT * FROM passengers WHERE email = ? AND password = ?',
+                [email, password]
+            );
+
+            if (results.length > 0) {
+                const passenger = results[0];
+                req.session.user = {
+                    id: passenger.passenger_id,
+                    name: passenger.name,
+                    email: passenger.email,
+                    role: 'passenger'
+                };
+                return res.redirect('/passenger/dashboard');
+            } else {
+                return res.render('auth/login', {
+                    role,
+                    error: 'Invalid credentials.'
+                });
+            }
+        }
+    } catch (err) {
+        console.error('Login Error:', err);
+        return res.render('auth/login', {
+            role,
+            error: 'Server error. Please try again later.'
         });
     }
 
-    // If role is not recognized
     return res.redirect('/');
 });
 
@@ -64,12 +106,37 @@ router.get('/signup/:role', (req, res) => {
     res.render('auth/signup', { role });
 });
 
-router.post('/signup', (req, res) => {
-    const { role } = req.body;
-    return res.render('auth/signup', { 
-        role, 
-        error: 'Database connection is not available. Please try again later.' 
-    });
+router.post('/signup', async (req, res) => {
+    const { name, email, password, role } = req.body;
+
+    try {
+        if (role === 'staff') {
+            await db.query(
+                'INSERT INTO employees (name, email, password, role, approved) VALUES (?, ?, ?, "staff", 0)',
+                [name, email, password]
+            );
+            return res.render('auth/login', {
+                role,
+                error: 'Signup successful. Please wait for admin approval.'
+            });
+        }
+
+        if (role === 'passenger') {
+            await db.query(
+                'INSERT INTO passengers (name, email, password) VALUES (?, ?, ?)',
+                [name, email, password]
+            );
+            return res.redirect('/login/passenger');
+        }
+
+        return res.redirect('/');
+    } catch (err) {
+        console.error('Signup Error:', err);
+        return res.render('auth/signup', {
+            role,
+            error: 'Signup failed. Try again later or use a different email.'
+        });
+    }
 });
 
 // Logout route
